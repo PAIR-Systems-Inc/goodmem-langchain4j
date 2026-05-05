@@ -39,4 +39,4 @@ jobs:
 
       - name: Show installed artifact
         run: |
-          ls -la ~/.m2/repository/io/github/pair-systems-inc/goodmem-langchain4j/0.1.0-SNAPSHOT/
+          ls -la ~/.m2/repository/io/github/bashareid/goodmem-langchain4j/0.1.0-SNAPSHOT/

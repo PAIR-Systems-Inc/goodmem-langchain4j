@@ -1,6 +1,6 @@
 # goodmem-langchain4j
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.pair-systems-inc/goodmem-langchain4j.svg)](https://central.sonatype.com/artifact/io.github.pair-systems-inc/goodmem-langchain4j)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.bashareid/goodmem-langchain4j.svg)](https://central.sonatype.com/artifact/io.github.bashareid/goodmem-langchain4j)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A GoodMem connector for [LangChain4j](https://github.com/langchain4j/langchain4j). Store and retrieve memories from a [GoodMem](https://goodmem.ai) server without having to configure your own data processing pipeline.
@@ -15,7 +15,7 @@ Add the dependency to your `pom.xml`:
 
 ```xml
 <dependency>
-    <groupId>io.github.pair-systems-inc</groupId>
+    <groupId>io.github.bashareid</groupId>
     <artifactId>goodmem-langchain4j</artifactId>
     <version>0.1.0</version>
 </dependency>
