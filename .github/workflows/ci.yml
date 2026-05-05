@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (jdk-${{ matrix.java-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: ["17", "21"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java-version }} (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+          cache: maven
+
+      - name: Build (release profile, gpg skipped)
+        # The release profile builds the sources + javadoc jars in addition to the main jar.
+        # Running it on every CI build catches javadoc breakage before a tagged release.
+        run: ./mvnw -B -ntp -Dgpg.skip=true -Prelease verify
+
+      - name: Smoke-install into local Maven repo
+        # Confirms the artifact installs cleanly under its declared coordinates.
+        run: ./mvnw -B -ntp -DskipTests install
+
+      - name: Show installed artifact
+        run: |
+          ls -la ~/.m2/repository/io/github/pair-systems-inc/goodmem-langchain4j/0.1.0-SNAPSHOT/

@@ -1,0 +1,55 @@
+name: Publish to Maven Central
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to Sonatype Central Portal
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin) with Sonatype Central credentials and GPG key
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+          # Writes ~/.m2/settings.xml with a <server id="central"> block whose
+          # username/password are read from the env vars below.
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          # Imports the GPG private key into the runner's keyring so
+          # maven-gpg-plugin can sign artifacts non-interactively.
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Set Maven version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting Maven version to $VERSION"
+          ./mvnw -B -ntp versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Verify pom version matches tag
+        run: |
+          POM_VERSION=$(./mvnw -B -ntp -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match pom version $POM_VERSION"
+            exit 1
+          fi
+
+      - name: Deploy to Sonatype Central Portal
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: ./mvnw -B -ntp -Prelease deploy
