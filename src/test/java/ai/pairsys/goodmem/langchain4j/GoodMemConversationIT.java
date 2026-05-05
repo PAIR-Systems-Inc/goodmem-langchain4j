@@ -1,4 +1,4 @@
-package ai.pairsys.langchain4j.goodmem;
+package ai.pairsys.goodmem.langchain4j;
 
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiChatModel;

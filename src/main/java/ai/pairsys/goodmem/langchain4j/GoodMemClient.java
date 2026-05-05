@@ -1,4 +1,4 @@
-package ai.pairsys.langchain4j.goodmem;
+package ai.pairsys.goodmem.langchain4j;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -63,6 +63,11 @@ public class GoodMemClient {
         this.httpClient = buildHttpClient();
     }
 
+    /**
+     * Returns the configured base URL of the GoodMem API server.
+     *
+     * @return the base URL (without trailing slash)
+     */
     public String baseUrl() {
         return baseUrl;
     }
@@ -74,6 +79,14 @@ public class GoodMemClient {
      * <p>
      * First lists existing spaces to check for a name match. If found,
      * returns the existing space info. Otherwise creates a new space.
+     *
+     * @param name              human-readable name of the space
+     * @param embedderId        UUID of the embedder model to use
+     * @param chunkingStrategy  chunking strategy id (e.g. "fixed", "none")
+     * @param chunkSize         maximum chunk size in tokens (ignored when strategy is "none")
+     * @param chunkOverlap      number of overlapping tokens between consecutive chunks
+     * @return result envelope containing {@code spaceId}, {@code name}, {@code embedderId},
+     *         and a {@code reused} boolean indicating whether an existing space was returned
      */
     public JsonObject createSpace(String name, String embedderId,
                                   String chunkingStrategy, int chunkSize, int chunkOverlap) {
@@ -140,6 +153,8 @@ public class GoodMemClient {
 
     /**
      * List all spaces.
+     *
+     * @return all spaces visible to the authenticated user
      */
     public List<JsonObject> listSpaces() {
         JsonElement body = getJson("/v1/spaces");
@@ -148,6 +163,9 @@ public class GoodMemClient {
 
     /**
      * Fetch a space by ID.
+     *
+     * @param spaceId UUID of the space to fetch
+     * @return result envelope containing the {@code space} object
      */
     public JsonObject getSpace(String spaceId) {
         JsonElement body = getJson("/v1/spaces/" + spaceId);
@@ -163,6 +181,13 @@ public class GoodMemClient {
      * Only {@code name}, {@code publicRead}, and labels are mutable.
      * Pass {@code null} for any field that should be left unchanged.
      * {@code replaceLabels} and {@code mergeLabels} are mutually exclusive.
+     *
+     * @param spaceId       UUID of the space to update
+     * @param name          new name, or {@code null} to leave unchanged
+     * @param publicRead    new public-read flag, or {@code null} to leave unchanged
+     * @param replaceLabels map of labels that fully replaces the existing labels, or {@code null}
+     * @param mergeLabels   map of labels merged into the existing labels, or {@code null}
+     * @return result envelope containing the updated {@code space} object
      */
     public JsonObject updateSpace(String spaceId, String name, Boolean publicRead,
                                   Map<String, String> replaceLabels,
@@ -192,6 +217,9 @@ public class GoodMemClient {
 
     /**
      * Delete a space and all its memories by ID.
+     *
+     * @param spaceId UUID of the space to delete
+     * @return result envelope confirming the deletion
      */
     public JsonObject deleteSpace(String spaceId) {
         delete("/v1/spaces/" + spaceId);
@@ -210,6 +238,13 @@ public class GoodMemClient {
      * <p>
      * If both filePath and textContent are provided, the file takes priority.
      * The file content type is auto-detected from its extension.
+     *
+     * @param spaceId     UUID of the space the memory belongs to
+     * @param textContent raw text content (used when {@code filePath} is null or empty)
+     * @param filePath    local path to a file to upload (takes priority over text content)
+     * @param metadata    optional key/value metadata attached to the memory, or {@code null}
+     * @return result envelope containing {@code memoryId}, {@code spaceId}, processing
+     *         {@code status}, and the resolved {@code contentType}
      */
     public JsonObject createMemory(String spaceId, String textContent, String filePath,
                                    Map<String, Object> metadata) {
@@ -286,6 +321,19 @@ public class GoodMemClient {
      * {@code llmTemperature}, or {@code chronologicalResort} is provided, a
      * {@code ChatPostProcessor} stage is appended that reranks, filters,
      * re-sorts, and/or generates an LLM summary ({@code abstractReply}).
+     *
+     * @param query                    natural-language query
+     * @param spaceIds                 one or more space UUIDs to search across, comma-separated
+     * @param maxResults               maximum number of matching chunks to return
+     * @param includeMemoryDefinition  whether to include full memory metadata alongside chunks
+     * @param waitForIndexing          whether to poll for up to 10 seconds when results are empty
+     * @param rerankerId               UUID of an optional reranker model, or {@code null}
+     * @param llmId                    UUID of an optional LLM that produces an {@code abstractReply}, or {@code null}
+     * @param relevanceThreshold       minimum relevance score (0-1) to keep, or {@code null}
+     * @param llmTemperature           creativity setting (0-2) for LLM generation, or {@code null}
+     * @param chronologicalResort      whether to reorder final results by creation time, or {@code null}
+     * @return result envelope containing {@code resultSetId}, {@code results}, {@code memories},
+     *         {@code totalResults}, {@code query}, and optionally {@code abstractReply}
      */
     public JsonObject retrieveMemories(String query, String spaceIds, int maxResults,
                                        boolean includeMemoryDefinition, boolean waitForIndexing,
@@ -430,6 +478,15 @@ public class GoodMemClient {
 
     /**
      * List memories within a space, with optional pagination and filtering.
+     *
+     * @param spaceId          UUID of the space to list memories from
+     * @param maxResults       maximum number of memories to return per page, or {@code null} for the server default
+     * @param nextToken        pagination token from a previous response, or {@code null} for the first page
+     * @param statusFilter     filter by processing status (e.g. "COMPLETED"), or {@code null} for all
+     * @param includeContent   whether to include the original content in each memory
+     * @param filterExpression server-side filter expression on labels/metadata, or {@code null}
+     * @return result envelope containing {@code memories}, {@code totalMemories},
+     *         and a {@code nextToken} when more pages are available
      */
     public JsonObject listMemories(String spaceId, Integer maxResults, String nextToken,
                                    String statusFilter, boolean includeContent,
@@ -483,6 +540,11 @@ public class GoodMemClient {
      * as JSON when the server responds with {@code application/json}, and as
      * a plain string otherwise (the {@code /content} endpoint returns the
      * raw bytes for non-JSON memories).
+     *
+     * @param memoryId       UUID of the memory to fetch
+     * @param includeContent whether to also fetch the memory's original content
+     * @return result envelope containing the {@code memory} object, and {@code content}
+     *         or {@code contentError} when {@code includeContent} is true
      */
     public JsonObject getMemory(String memoryId, boolean includeContent) {
         JsonElement memoryBody = getJson("/v1/memories/" + memoryId);
@@ -513,6 +575,9 @@ public class GoodMemClient {
 
     /**
      * Delete a memory by ID.
+     *
+     * @param memoryId UUID of the memory to delete
+     * @return result envelope confirming the deletion
      */
     public JsonObject deleteMemory(String memoryId) {
         delete("/v1/memories/" + memoryId);
@@ -526,6 +591,8 @@ public class GoodMemClient {
 
     /**
      * List all available embedder models.
+     *
+     * @return all embedder models visible to the authenticated user
      */
     public List<JsonObject> listEmbedders() {
         JsonElement body = getJson("/v1/embedders");

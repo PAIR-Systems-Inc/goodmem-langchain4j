@@ -1,6 +1,6 @@
-# langchain4j-goodmem
+# goodmem-langchain4j
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.pair-systems-inc/langchain4j-goodmem.svg)](https://central.sonatype.com/artifact/io.github.pair-systems-inc/langchain4j-goodmem)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.pair-systems-inc/goodmem-langchain4j.svg)](https://central.sonatype.com/artifact/io.github.pair-systems-inc/goodmem-langchain4j)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A GoodMem connector for [LangChain4j](https://github.com/langchain4j/langchain4j). Store and retrieve memories from a [GoodMem](https://goodmem.ai) server without having to configure your own data processing pipeline.
@@ -16,7 +16,7 @@ Add the dependency to your `pom.xml`:
 ```xml
 <dependency>
     <groupId>io.github.pair-systems-inc</groupId>
-    <artifactId>langchain4j-goodmem</artifactId>
+    <artifactId>goodmem-langchain4j</artifactId>
     <version>0.1.0</version>
 </dependency>
 ```
@@ -26,7 +26,7 @@ Requires Java 17+ and `dev.langchain4j:langchain4j-core` 1.14.0 or newer.
 ## Quickstart
 
 ```java
-import ai.pairsys.langchain4j.goodmem.GoodMemTools;
+import ai.pairsys.goodmem.langchain4j.GoodMemTools;
 import dev.langchain4j.service.AiServices;
 
 GoodMemTools goodMemTools = GoodMemTools.builder()
@@ -88,7 +88,7 @@ String results = tools.goodmemRetrieveMemories(
         null, null, null, null, null);
 ```
 
-See [`GoodMemTools.java`](src/main/java/ai/pairsys/langchain4j/goodmem/GoodMemTools.java) for the full method signatures.
+See [`GoodMemTools.java`](src/main/java/ai/pairsys/goodmem/langchain4j/GoodMemTools.java) for the full method signatures.
 
 ## Testing
 
@@ -105,11 +105,11 @@ export OPENAI_API_KEY=sk-...
 
 ```
 src/
-├── main/java/ai/pairsys/langchain4j/goodmem/
+├── main/java/ai/pairsys/goodmem/langchain4j/
 │   ├── GoodMemClient.java     # HTTP client for the GoodMem REST API
 │   ├── GoodMemException.java  # Wrapper exception for API errors
 │   └── GoodMemTools.java      # LangChain4j @Tool surface
-└── test/java/ai/pairsys/langchain4j/goodmem/
+└── test/java/ai/pairsys/goodmem/langchain4j/
     ├── GoodMemConversationIT.java  # End-to-end agent conversation IT
     └── GoodMemToolsIT.java         # Tool-level integration tests
 ```

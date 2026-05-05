@@ -1,4 +1,4 @@
-package ai.pairsys.langchain4j.goodmem;
+package ai.pairsys.goodmem.langchain4j;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;

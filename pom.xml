@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.pair-systems-inc</groupId>
-    <artifactId>langchain4j-goodmem</artifactId>
+    <artifactId>goodmem-langchain4j</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
