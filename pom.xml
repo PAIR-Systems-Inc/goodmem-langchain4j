@@ -11,7 +11,7 @@
 
     <name>LangChain4j :: Integration :: GoodMem</name>
     <description>A GoodMem connector for LangChain4j. Store and retrieve memories from a GoodMem server without having to configure your own data processing pipeline.</description>
-    <url>https://github.com/PAIR-Systems-Inc/goodmem_langchain4j</url>
+    <url>https://github.com/PAIR-Systems-Inc/goodmem-langchain4j</url>
     <inceptionYear>2026</inceptionYear>
 
     <organization>
@@ -38,15 +38,15 @@
     </developers>
 
     <scm>
-        <connection>scm:git:git://github.com/PAIR-Systems-Inc/goodmem_langchain4j.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/PAIR-Systems-Inc/goodmem_langchain4j.git</developerConnection>
-        <url>https://github.com/PAIR-Systems-Inc/goodmem_langchain4j</url>
+        <connection>scm:git:git://github.com/PAIR-Systems-Inc/goodmem-langchain4j.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/PAIR-Systems-Inc/goodmem-langchain4j.git</developerConnection>
+        <url>https://github.com/PAIR-Systems-Inc/goodmem-langchain4j</url>
         <tag>HEAD</tag>
     </scm>
 
     <issueManagement>
         <system>GitHub Issues</system>
-        <url>https://github.com/PAIR-Systems-Inc/goodmem_langchain4j/issues</url>
+        <url>https://github.com/PAIR-Systems-Inc/goodmem-langchain4j/issues</url>
     </issueManagement>
 
     <properties>
