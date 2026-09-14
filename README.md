@@ -1,119 +1,80 @@
-# goodmem-langchain4j
+# GoodMem for LangChain4j
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.bashareid/goodmem-langchain4j.svg)](https://central.sonatype.com/artifact/io.github.bashareid/goodmem-langchain4j)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Use [GoodMem](https://goodmem.ai) as the memory and retrieval service for your Java application. Write LangChain4j Documents, retrieve text with source metadata, and connect it to your existing agent or RAG workflow. GoodMem handles chunking, embedding, storage and optional reranking.
 
-A GoodMem connector for [LangChain4j](https://github.com/langchain4j/langchain4j). Store and retrieve memories from a [GoodMem](https://goodmem.ai) server without having to configure your own data processing pipeline.
+## Install
 
-## What is GoodMem?
-
-GoodMem is a memory layer for AI agents with first-class support for semantic storage, retrieval, and summarization. This package exposes GoodMem operations as LangChain4j `@Tool`s that any LangChain4j agent can call.
-
-## Installation
-
-Add the dependency to your `pom.xml`:
+Requires **Java 21+** and LangChain4j 1.20.0+.
 
 ```xml
 <dependency>
     <groupId>io.github.bashareid</groupId>
     <artifactId>goodmem-langchain4j</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
-Requires Java 17+ and `dev.langchain4j:langchain4j-core` 1.14.0 or newer.
+The integration includes the official GoodMem Java SDK and LangChain4j. For AI Services, add your preferred chat-model provider.
 
-## Quickstart
+## Store and retrieve documents
+
+[Set up GoodMem](https://docs.goodmem.ai/docs/how-to/basic-rag/) and a space, then set `GOODMEM_BASE_URL`, `GOODMEM_API_KEY` and `GOODMEM_SPACE_ID`. Optionally set `GOODMEM_RERANKER_ID` to enable reranking; it does not require an LLM.
 
 ```java
-import ai.pairsys.goodmem.langchain4j.GoodMemTools;
-import dev.langchain4j.service.AiServices;
+import ai.pairsys.goodmem.client.Goodmem;
+import ai.pairsys.goodmem.langchain4j.GoodMemContentRetriever;
+import ai.pairsys.goodmem.langchain4j.GoodMemDocumentIngestor;
+import ai.pairsys.goodmem.langchain4j.GoodMemFilters;
+import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.rag.query.Query;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
-GoodMemTools goodMemTools = GoodMemTools.builder()
-        .baseUrl("https://localhost:8080")
-        .apiKey("your-api-key")
-        .verifySsl(false)
-        .build();
+public class Quickstart {
+    public static void main(String[] args) {
+        String spaceId = System.getenv("GOODMEM_SPACE_ID");
+        try (Goodmem client = Goodmem.builder()
+                .baseUrl(System.getenv("GOODMEM_BASE_URL"))
+                .apiKey(System.getenv("GOODMEM_API_KEY"))
+                .build()) {
+            var ingestor = GoodMemDocumentIngestor.builder()
+                    .client(client).spaceId(spaceId).build();
+            ingestor.ingestAndWait(List.of(Document.from(
+                    "Customers may return unused items within 30 days.",
+                    Metadata.from(Map.of("source", "handbook", "team", "support")))), Duration.ofMinutes(2));
 
-interface Assistant {
-    String chat(String message);
+            var retriever = GoodMemContentRetriever.builder()
+                    .client(client).spaceIds(List.of(spaceId))
+                    .filterExpression(GoodMemFilters.textEquals("team", "support"))
+                    .rerankerId(System.getenv("GOODMEM_RERANKER_ID"))
+                    .build();
+            for (var content : retriever.retrieve(Query.from("What is the return policy?"))) {
+                System.out.println(content.textSegment());
+            }
+        }
+    }
 }
-
-Assistant assistant = AiServices.builder(Assistant.class)
-        .chatLanguageModel(model)
-        .tools(goodMemTools)
-        .build();
 ```
 
-## Configuration
+`ingestAndWait` returns memory IDs after indexing, within the timeout you choose. Use `ingest` to return as soon as writes are accepted. Readiness failures retain the IDs so you can wait again without uploading again. Each ingestion creates new memories.
 
-`GoodMemTools.builder()` accepts:
+## Connect your agent
 
-| Option | Description |
-|---|---|
-| `baseUrl` | URL of the GoodMem server (e.g. `https://localhost:8080`) |
-| `apiKey` | API key for authentication |
-| `verifySsl` | Disable to accept self-signed certificates in development |
+Pass the retriever to `AiServices.builder(...).contentRetriever(retriever)`. A `Result<String>` return type gives you both the answer and `sources()`.
 
-## API Reference
+For agent-directed search, use `retriever.asTool("searchPolicies", "Search our customer policies")`. Register a `List<AiServiceTool>` through `.tools(searchTools)`. Its only input is the query; your application configures the spaces, filters and reranker. Agents that need to manage spaces or write memories can use `new GoodMemTools(client)`. Local file uploads require an explicitly configured directory.
 
-| Tool | Description |
-|---|---|
-| `goodmemListEmbedders` | List available embedder models |
-| `goodmemListSpaces` | List all spaces in your account |
-| `goodmemGetSpace` | Fetch a specific space by ID |
-| `goodmemCreateSpace` | Create a new space or reuse an existing one |
-| `goodmemUpdateSpace` | Update name, public-read flag, or labels of a space |
-| `goodmemDeleteSpace` | Permanently delete a space and all its memories |
-| `goodmemCreateMemory` | Store text or files as memories |
-| `goodmemListMemories` | List memories within a space (paginated, filterable) |
-| `goodmemRetrieveMemories` | Semantic search with optional reranker / LLM post-processor |
-| `goodmemGetMemory` | Fetch a specific memory by ID |
-| `goodmemDeleteMemory` | Permanently delete a memory |
+See the [usage guide](docs/usage.md) for AI Services, dynamic filters, async workflows and tool results, and the [migration notes](CHANGELOG.md) before upgrading from 0.1.
 
-You can also call any tool directly without an agent:
-
-```java
-GoodMemTools tools = GoodMemTools.builder()
-        .baseUrl("https://localhost:8080")
-        .apiKey("your-api-key")
-        .verifySsl(false)
-        .build();
-
-String embedders = tools.goodmemListEmbedders();
-String space = tools.goodmemCreateSpace("my-space", "embedder-id", null, null, null);
-String memory = tools.goodmemCreateMemory("space-id", "Important information.", null);
-String results = tools.goodmemRetrieveMemories(
-        "search query", "space-id", 5, true, true,
-        null, null, null, null, null);
-```
-
-See [`GoodMemTools.java`](src/main/java/ai/pairsys/goodmem/langchain4j/GoodMemTools.java) for the full method signatures.
-
-## Testing
-
-Unit-style tests run by default. Integration tests (`*IT.java`) require a live GoodMem server and OpenAI API key, and are auto-skipped when the env vars below are unset:
+## Development
 
 ```bash
-export GOODMEM_BASE_URL=https://localhost:8080
-export GOODMEM_API_KEY=your-key
-export OPENAI_API_KEY=sk-...
 ./mvnw verify
+./mvnw spotless:apply
 ```
 
-## Project Structure
+The tests exercise the real SDK over a local HTTP fixture and use LangChain4j's actual tool and RAG APIs. [Live tests](docs/usage.md#live-tests) additionally check a running GoodMem server. The README example is compiled during testing.
 
-```
-src/
-├── main/java/ai/pairsys/goodmem/langchain4j/
-│   ├── GoodMemClient.java     # HTTP client for the GoodMem REST API
-│   ├── GoodMemException.java  # Wrapper exception for API errors
-│   └── GoodMemTools.java      # LangChain4j @Tool surface
-└── test/java/ai/pairsys/goodmem/langchain4j/
-    ├── GoodMemConversationIT.java  # End-to-end agent conversation IT
-    └── GoodMemToolsIT.java         # Tool-level integration tests
-```
-
-## License
-
-[MIT](LICENSE) © PAIR Systems, Inc.
+[MIT](LICENSE) · [Source](https://github.com/PAIR-Systems-Inc/goodmem-langchain4j) · [Maven Central](https://central.sonatype.com/artifact/io.github.bashareid/goodmem-langchain4j)
