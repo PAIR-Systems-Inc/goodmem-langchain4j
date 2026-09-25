@@ -84,6 +84,8 @@ Each ingestion creates new memories. Source downloading, deduplication and repla
 
 `new GoodMemTools(client)` provides space and memory operations as eleven `@Tool` methods. LangChain4j serializes the results and handles exceptions. Direct tool HTTP failures retain their SDK exception types. Configure which tools your agent receives according to its job; use the scoped search tool for a read-only assistant.
 
+IDs must be UUIDs everywhere: tool arguments, retriever and ingestor builders, and `GoodMemIndexing`. The SDK places IDs in URL paths, where a memory ID such as `../spaces/<id>` would otherwise delete or read a space. Any other value, including padded or percent-encoded forms, throws `IllegalArgumentException` naming the argument before a request is made; LangChain4j returns that message to the model as the tool error. Uppercase UUIDs are accepted and sent in lowercase.
+
 `goodmemRetrieveMemories` returns `chunks` (text, source, score and IDs), optional `abstractReply`, `statuses` and `partial`. Any non-informational status sets `partial=true`; useful chunks remain available. The tool description tells the model to acknowledge partial results. `fetchK` controls server candidates even without reranking or summarization. Use the SDK directly when you need the complete event stream.
 
 The content retriever and its scoped search tool throw `GoodMemRetrievalException` for known non-informational statuses; diagnostics are available through `statuses()`. Future server codes map to `UNKNOWN` in the SDK and do not abort content retrieval. They remain visible in the administrative retrieval tool, which marks the result partial. Malformed streams and HTTP failures still throw.

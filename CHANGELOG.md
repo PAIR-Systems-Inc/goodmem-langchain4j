@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 (2026-09-25)
+
+Security fix. Update from 0.2.0; there are no API changes for callers that pass UUIDs.
+
+- Every GoodMem ID must now be a UUID, checked before any request is made. The SDK places IDs in URL paths and OkHttp resolves dot segments, so in 0.2.0 an agent calling `goodmemDeleteMemory` with `../spaces/<id>` sent `DELETE /v1/spaces/<id>` and was told `Success`. `%2e%2e/spaces/<id>`, `a/../../spaces/<id>` and `<id>/../../spaces/<id>` did the same, and `goodmemGetMemory`, `goodmemGetSpace`, `goodmemUpdateSpace`, `goodmemDeleteSpace`, `goodmemListMemories` and `GoodMemIndexing.waitForMemory` were equally redirectable. Non-UUID IDs now throw `IllegalArgumentException` naming the argument, which LangChain4j returns to the model as the tool error; nothing is sent.
+- The same check covers IDs sent in request bodies or configured once: the tools' `embedderId`, `spaceId`, `spaceIds`, `rerankerId` and `llmId`; `GoodMemContentRetriever.Builder.spaceIds` and `rerankerId`; `GoodMemDocumentIngestor.Builder.spaceId`; and `GoodMemIndexing.waitForMemories`. Builders fail when configured.
+- UUIDs are sent in lowercase. An uppercase configured space ID now matches the IDs the server returns instead of failing retrieval as a memory outside the configured spaces.
+
 ## 0.2.0 (2026-09-14)
 
 This is a clean API break. Requires Java 21 and LangChain4j 1.20.0. Maven coordinates remain `io.github.bashareid:goodmem-langchain4j`.

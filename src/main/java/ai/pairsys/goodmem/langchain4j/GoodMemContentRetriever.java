@@ -154,9 +154,13 @@ public final class GoodMemContentRetriever implements ContentRetriever {
      *
      * @param spaceIds one or more space UUIDs
      * @return this builder
+     * @throws IllegalArgumentException if an ID is not a UUID
      */
     public Builder spaceIds(List<String> spaceIds) {
-      this.spaceIds = spaceIds.stream().map(SpaceId::from).toList();
+      this.spaceIds =
+          spaceIds.stream()
+              .map(id -> SpaceId.from(GoodMemIds.requireUuid(id, "spaceIds")))
+              .toList();
       return this;
     }
 
@@ -210,9 +214,13 @@ public final class GoodMemContentRetriever implements ContentRetriever {
      *
      * @param rerankerId reranker UUID, or null to disable reranking
      * @return this builder
+     * @throws IllegalArgumentException if the ID is not a UUID
      */
     public Builder rerankerId(String rerankerId) {
-      this.rerankerId = rerankerId == null ? null : RerankerId.from(rerankerId);
+      this.rerankerId =
+          rerankerId == null
+              ? null
+              : RerankerId.from(GoodMemIds.requireUuid(rerankerId, "rerankerId"));
       return this;
     }
 

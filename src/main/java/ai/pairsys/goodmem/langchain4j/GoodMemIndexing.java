@@ -21,10 +21,14 @@ public final class GoodMemIndexing {
    * @param memoryIds accepted memory IDs to check; no other memories are queried
    * @param timeout explicit polling budget; SDK request timeouts apply to each HTTP call
    * @throws GoodMemIndexingException when readiness cannot be confirmed, with IDs for a later retry
+   * @throws IllegalArgumentException if an ID is not a UUID; no request is made
    */
   public static void waitForMemories(Goodmem client, List<MemoryId> memoryIds, Duration timeout) {
     Objects.requireNonNull(client, "client");
-    List<MemoryId> ids = List.copyOf(memoryIds);
+    List<MemoryId> ids =
+        List.copyOf(memoryIds).stream()
+            .map(id -> MemoryId.from(GoodMemIds.requireUuid(id.value(), "memoryIds")))
+            .toList();
     positive(timeout);
     var pending = new LinkedHashSet<>(ids);
     long started = System.nanoTime();
@@ -104,37 +108,41 @@ public final class GoodMemIndexing {
    * @param timeout maximum polling time; SDK request timeouts apply to each HTTP call
    * @return the completed memory
    * @throws GoodMemException when processing fails, polling times out, or the thread is interrupted
+   * @throws IllegalArgumentException if the ID is not a UUID; no request is made
    */
   public static Memory waitForMemory(Goodmem client, MemoryId memoryId, Duration timeout) {
     Objects.requireNonNull(client, "client");
-    Objects.requireNonNull(memoryId, "memoryId");
+    MemoryId id =
+        MemoryId.from(
+            GoodMemIds.requireUuid(
+                Objects.requireNonNull(memoryId, "memoryId").value(), "memoryId"));
     positive(timeout);
     long started = System.nanoTime();
     while (true) {
       if (Thread.currentThread().isInterrupted()) {
-        throw new GoodMemException("Interrupted while waiting for memory " + memoryId);
+        throw new GoodMemException("Interrupted while waiting for memory " + id);
       }
       if (System.nanoTime() - started >= timeout.toNanos()) {
-        throw new GoodMemException("Timed out waiting for memory " + memoryId);
+        throw new GoodMemException("Timed out waiting for memory " + id);
       }
-      Memory memory = client.memories.get(memoryId);
+      Memory memory = client.memories.get(id);
       if (memory.processingStatus() == MemoryProcessingStatus.COMPLETED) {
         return memory;
       }
       if (memory.processingStatus() != MemoryProcessingStatus.PENDING
           && memory.processingStatus() != MemoryProcessingStatus.PROCESSING) {
         throw new GoodMemException(
-            "Memory " + memoryId + " has processing status " + memory.processingStatus());
+            "Memory " + id + " has processing status " + memory.processingStatus());
       }
       long remaining = timeout.toNanos() - (System.nanoTime() - started);
       if (remaining <= 0) {
-        throw new GoodMemException("Timed out waiting for memory " + memoryId);
+        throw new GoodMemException("Timed out waiting for memory " + id);
       }
       try {
         Thread.sleep(Duration.ofNanos(Math.min(remaining, Duration.ofMillis(200).toNanos())));
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
-        throw new GoodMemException("Interrupted while waiting for memory " + memoryId, e);
+        throw new GoodMemException("Interrupted while waiting for memory " + id, e);
       }
     }
   }
