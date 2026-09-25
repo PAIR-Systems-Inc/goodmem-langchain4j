@@ -25,10 +25,20 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Converts SDK events to framework content; HTTP and stream parsing belong to the SDK. */
 final class RetrievalResults {
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final Logger LOG = LoggerFactory.getLogger(RetrievalResults.class);
+  static final String PARTIAL = "goodmem_partial";
+  static final String STATUSES = "goodmem_statuses";
+  static final String SCORE_TYPE = "goodmem_score_type";
+  private static final Set<String> RESERVED =
+      Set.of(
+          "memory_id", "chunk_id", "space_id", "goodmem_metadata", PARTIAL, STATUSES, SCORE_TYPE);
 
   private RetrievalResults() {}
 
@@ -40,17 +50,46 @@ final class RetrievalResults {
     }
   }
 
-  static List<Content> content(
-      List<RetrieveMemoryEvent> events, Set<SpaceId> spaces, int limit, boolean reranked) {
+  /**
+   * Contents for the framework plus the non-informational diagnostics they were retrieved with;
+   * {@code vectorFallback} means a configured reranker did not run.
+   */
+  record ContentResult(
+      List<Content> contents, List<GoodMemStatus> statuses, boolean vectorFallback) {
+    boolean partial() {
+      return !statuses.isEmpty();
+    }
+  }
+
+  static ContentResult content(
+      List<RetrieveMemoryEvent> events,
+      Set<SpaceId> spaces,
+      int limit,
+      boolean reranked,
+      boolean failOnIncomplete) {
     List<GoodMemStatus> problems =
         events.stream()
             .map(RetrieveMemoryEvent::status)
             .filter(Objects::nonNull)
-            .filter(s -> s.code() != GoodMemStatusCode.UNKNOWN && !informational(s))
+            .filter(s -> !informational(s))
             .toList();
-    if (!problems.isEmpty()) {
-      throw new GoodMemRetrievalException(problems);
+    if (failOnIncomplete) {
+      // Opt-in legacy behaviour: known codes abort; future (UNKNOWN) codes never did.
+      var known = problems.stream().filter(s -> s.code() != GoodMemStatusCode.UNKNOWN).toList();
+      if (!known.isEmpty()) {
+        throw new GoodMemRetrievalException(known);
+      }
     }
+    // GoodMem falls back to vector order when the reranker is missing or fails, so the scores
+    // then come from vector search and must not be reported as reranker scores.
+    boolean rerankerScored =
+        reranked
+            && problems.stream()
+                .noneMatch(
+                    s ->
+                        s.code() == GoodMemStatusCode.RERANKING_FAILED
+                            || s.code() == GoodMemStatusCode.NOT_FOUND);
+    String statusJson = problems.isEmpty() ? null : statusJson(problems);
     Map<MemoryId, Memory> memories = memories(events);
     Set<ChunkId> seen = new HashSet<>();
     List<Content> results = new ArrayList<>();
@@ -82,11 +121,10 @@ final class RetrievalResults {
       copyMetadata(metadata, chunk.metadata());
       var memoryMetadata = memory.metadata() == null ? Map.<String, Object>of() : memory.metadata();
       var chunkMetadata = chunk.metadata() == null ? Map.<String, Object>of() : chunk.metadata();
-      Set<String> reserved = Set.of("memory_id", "chunk_id", "space_id", "goodmem_metadata");
       boolean collision =
           memoryMetadata.keySet().stream().anyMatch(chunkMetadata::containsKey)
-              || memoryMetadata.keySet().stream().anyMatch(reserved::contains)
-              || chunkMetadata.keySet().stream().anyMatch(reserved::contains);
+              || memoryMetadata.keySet().stream().anyMatch(RESERVED::contains)
+              || chunkMetadata.keySet().stream().anyMatch(RESERVED::contains);
       if (collision) {
         // LangChain4j Metadata accepts scalar values, so keep the originals as JSON.
         copyMetadata(
@@ -99,10 +137,19 @@ final class RetrievalResults {
       metadata.put("memory_id", chunk.memoryId().toString());
       metadata.put("chunk_id", chunk.chunkId().toString());
       metadata.put("space_id", memory.spaceId().toString());
+      // Integration-owned markers are never taken from stored metadata (originals stay above).
+      metadata.remove(PARTIAL);
+      metadata.remove(STATUSES);
+      metadata.remove(SCORE_TYPE);
+      if (statusJson != null) {
+        metadata.put(PARTIAL, "true");
+        metadata.put(STATUSES, statusJson);
+      }
       Map<ContentMetadata, Object> scores = new EnumMap<>(ContentMetadata.class);
       if (reference.relevanceScore() != null) {
         scores.put(ContentMetadata.SCORE, reference.relevanceScore());
-        if (reranked) {
+        metadata.put(SCORE_TYPE, rerankerScored ? "reranker" : "vector");
+        if (rerankerScored) {
           scores.put(ContentMetadata.RERANKED_SCORE, reference.relevanceScore());
         }
       }
@@ -111,7 +158,42 @@ final class RetrievalResults {
             Content.from(TextSegment.from(chunk.chunkText(), Metadata.from(metadata)), scores));
       }
     }
-    return List.copyOf(results);
+    if (!problems.isEmpty()) {
+      LOG.warn(
+          "GoodMem retrieval was incomplete; returning {} result(s) marked {}=true{}: {}",
+          results.size(),
+          PARTIAL,
+          reranked && !rerankerScored ? " in vector order because reranking did not run" : "",
+          summary(problems));
+    }
+    return new ContentResult(List.copyOf(results), problems, reranked && !rerankerScored);
+  }
+
+  static String summary(List<GoodMemStatus> statuses) {
+    return statuses.stream()
+        .map(
+            s -> s.message() == null ? s.code().name() : s.code().name() + " (" + s.message() + ")")
+        .collect(Collectors.joining(", "));
+  }
+
+  static String statusJson(List<GoodMemStatus> statuses) {
+    List<Map<String, Object>> list = new ArrayList<>();
+    for (var status : statuses) {
+      Map<String, Object> entry = new LinkedHashMap<>();
+      entry.put("code", status.code().name());
+      if (status.message() != null) {
+        entry.put("message", status.message());
+      }
+      if (status.details() != null && !status.details().isEmpty()) {
+        entry.put("details", status.details());
+      }
+      list.add(entry);
+    }
+    try {
+      return JSON.writeValueAsString(list);
+    } catch (JsonProcessingException e) {
+      throw new GoodMemException("Cannot represent retrieval statuses", e);
+    }
   }
 
   private static Map<MemoryId, Memory> memories(List<RetrieveMemoryEvent> events) {

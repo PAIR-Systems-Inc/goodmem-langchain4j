@@ -132,7 +132,33 @@ class GoodMemContentRetrieverTest extends SdkTestSupport {
         "SUMMARIZATION_FAILED",
         "NOT_FOUND"
       })
-  void incompleteRetrievalIsAnErrorEvenWhenChunksExist(String code) {
+  void incompleteRetrievalKeepsChunksAndMarksThemPartial(String code) throws Exception {
+    events(
+        chunk(CHUNK, MEMORY, "Partial text", 0.5),
+        definition(MEMORY, SPACE, Map.of()),
+        status(code));
+    var contents = retriever().build().retrieve(Query.from("query"));
+    assertEquals(
+        List.of("Partial text"), contents.stream().map(c -> c.textSegment().text()).toList());
+    var metadata = contents.getFirst().textSegment().metadata();
+    assertEquals("true", metadata.getString("goodmem_partial"));
+    assertEquals(
+        code, JSON.readTree(metadata.getString("goodmem_statuses")).at("/0/code").asText());
+    assertEquals(1, server.getRequestCount());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "EMBEDDER_FAILED",
+        "RERANKING_FAILED",
+        "VECTOR_SEARCH_PARTIAL",
+        "VECTOR_SEARCH_FAILED",
+        "MEMORY_CONTENT_UNAVAILABLE",
+        "SUMMARIZATION_FAILED",
+        "NOT_FOUND"
+      })
+  void failOnIncompleteRetrievalRestoresTheThrowWhenOptedIn(String code) {
     events(
         chunk(CHUNK, MEMORY, "Partial text", 0.5),
         definition(MEMORY, SPACE, Map.of()),
@@ -140,9 +166,24 @@ class GoodMemContentRetrieverTest extends SdkTestSupport {
     var failure =
         assertThrows(
             GoodMemRetrievalException.class,
-            () -> retriever().build().retrieve(Query.from("query")));
+            () ->
+                retriever().failOnIncompleteRetrieval(true).build().retrieve(Query.from("query")));
     assertEquals(GoodMemStatusCode.valueOf(code), failure.statuses().getFirst().code());
     assertEquals(1, server.getRequestCount());
+  }
+
+  @Test
+  void failOnIncompleteRetrievalStillToleratesFutureStatusCodes() throws Exception {
+    events(
+        chunk(CHUNK, MEMORY, "Kept", 0.5),
+        status("FUTURE_STATUS"),
+        definition(MEMORY, SPACE, Map.of()));
+    var contents =
+        retriever().failOnIncompleteRetrieval(true).build().retrieve(Query.from("query"));
+    var metadata = contents.getFirst().textSegment().metadata();
+    assertEquals("true", metadata.getString("goodmem_partial"));
+    assertEquals(
+        "UNKNOWN", JSON.readTree(metadata.getString("goodmem_statuses")).at("/0/code").asText());
   }
 
   @Test
@@ -154,7 +195,7 @@ class GoodMemContentRetrieverTest extends SdkTestSupport {
   }
 
   @Test
-  void futureStatusDoesNotDiscardValidRetrievalResults() {
+  void futureStatusDoesNotDiscardValidRetrievalResults() throws Exception {
     events(
         chunk(CHUNK, MEMORY, "Before the unfamiliar status", 0.6),
         status("FUTURE_INFORMATIONAL_STATUS"),
@@ -164,6 +205,8 @@ class GoodMemContentRetrieverTest extends SdkTestSupport {
     assertEquals(
         List.of("Before the unfamiliar status", "After the unfamiliar status"),
         results.stream().map(content -> content.textSegment().text()).toList());
+    // Like goodmemRetrieveMemories, an unrecognised diagnostic marks the result partial.
+    assertEquals("true", results.getFirst().textSegment().metadata().getString("goodmem_partial"));
     assertEquals(1, server.getRequestCount());
   }
 

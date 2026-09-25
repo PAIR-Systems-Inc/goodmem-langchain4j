@@ -2,11 +2,15 @@
 
 ## 0.2.1 (2026-09-25)
 
-Security fix. Update from 0.2.0; there are no API changes for callers that pass UUIDs.
+Security fix and a retrieval contract fix. Update from 0.2.0; callers that pass UUIDs need no code changes, but `GoodMemContentRetriever` no longer throws on server diagnostics by default (see below).
 
 - Every GoodMem ID must now be a UUID, checked before any request is made. The SDK places IDs in URL paths and OkHttp resolves dot segments, so in 0.2.0 an agent calling `goodmemDeleteMemory` with `../spaces/<id>` sent `DELETE /v1/spaces/<id>` and was told `Success`. `%2e%2e/spaces/<id>`, `a/../../spaces/<id>` and `<id>/../../spaces/<id>` did the same, and `goodmemGetMemory`, `goodmemGetSpace`, `goodmemUpdateSpace`, `goodmemDeleteSpace`, `goodmemListMemories` and `GoodMemIndexing.waitForMemory` were equally redirectable. Non-UUID IDs now throw `IllegalArgumentException` naming the argument, which LangChain4j returns to the model as the tool error; nothing is sent.
 - The same check covers IDs sent in request bodies or configured once: the tools' `embedderId`, `spaceId`, `spaceIds`, `rerankerId` and `llmId`; `GoodMemContentRetriever.Builder.spaceIds` and `rerankerId`; `GoodMemDocumentIngestor.Builder.spaceId`; and `GoodMemIndexing.waitForMemories`. Builders fail when configured.
 - UUIDs are sent in lowercase. An uppercase configured space ID now matches the IDs the server returns instead of failing retrieval as a memory outside the configured spaces.
+- `GoodMemContentRetriever.retrieve` no longer discards hits when GoodMem reports a problem. In 0.2.0 any known non-informational status threw `GoodMemRetrievalException`: with a nonexistent reranker GoodMem streamed ten vector-search hits plus `NOT_FOUND` and `RERANKING_FAILED`, and all ten were lost, an AI Service built with `.contentRetriever(retriever)` failed the whole `chat` call, and the scoped search tool gave the model an error instead of the hits. It now returns the hits, marks each `TextSegment` with `goodmem_partial` = `"true"` and the statuses as JSON in `goodmem_statuses`, and logs one SLF4J warning. A problem with no hits returns an empty list. Future `UNKNOWN` codes also mark results partial, as `goodmemRetrieveMemories` already did.
+- The scoped search tool returns an object with `results`, `partial`, `statuses` and a `note` for the model when retrieval was incomplete; complete results keep the 0.2.0 JSON array.
+- When the configured reranker did not run (`RERANKING_FAILED` or `NOT_FOUND`), results are no longer given `RERANKED_SCORE`; their scores are vector-search scores. Every scored result now carries `goodmem_score_type` (`reranker` or `vector`).
+- New `GoodMemContentRetriever.Builder.failOnIncompleteRetrieval(true)` restores the 0.2.0 exception for callers that want it.
 
 ## 0.2.0 (2026-09-14)
 

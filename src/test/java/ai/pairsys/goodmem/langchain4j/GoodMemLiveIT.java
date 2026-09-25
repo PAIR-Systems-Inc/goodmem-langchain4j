@@ -2,6 +2,7 @@ package ai.pairsys.goodmem.langchain4j;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +14,7 @@ import ai.pairsys.goodmem.client.models.MemoryProcessingStatus;
 import ai.pairsys.goodmem.client.models.Space;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.rag.content.ContentMetadata;
 import dev.langchain4j.rag.query.Query;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -170,14 +172,25 @@ class GoodMemLiveIT {
                       e.code() == GoodMemStatusCode.NOT_FOUND
                           || e.code() == GoodMemStatusCode.RERANKING_FAILED),
           "An invalid reranker must produce a visible diagnostic");
-      var retriever =
+      var builder =
           GoodMemContentRetriever.builder()
               .client(client)
               .spaceIds(List.of(space.spaceId().toString()))
               .rerankerId(BAD_ID)
-              .build();
+              .maxResults(3);
+      // Default: the vector-fallback hits are kept, flagged partial and not labelled reranked.
+      var contents = builder.build().retrieve(Query.from("Java memory"));
+      assertFalse(contents.isEmpty(), "Vector fallback hits must not be discarded");
+      assertEquals(events.chunks().size(), contents.size());
+      for (var content : contents) {
+        assertEquals("true", content.textSegment().metadata().getString("goodmem_partial"));
+        assertEquals("vector", content.textSegment().metadata().getString("goodmem_score_type"));
+        assertNull(content.metadata().get(ContentMetadata.RERANKED_SCORE));
+      }
       assertThrows(
-          GoodMemRetrievalException.class, () -> retriever.retrieve(Query.from("Java memory")));
+          GoodMemRetrievalException.class,
+          () ->
+              builder.failOnIncompleteRetrieval(true).build().retrieve(Query.from("Java memory")));
     } finally {
       client.spaces.delete(space.spaceId());
     }

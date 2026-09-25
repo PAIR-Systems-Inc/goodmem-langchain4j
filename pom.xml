@@ -59,6 +59,8 @@
         <goodmem.version>0.2.2</goodmem.version>
         <jackson.version>2.22.1</jackson.version>
         <junit.version>5.13.4</junit.version>
+        <!-- Same slf4j-api that langchain4j 1.20.0 already brings in. -->
+        <slf4j.version>2.0.18</slf4j.version>
 
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
@@ -99,9 +101,22 @@
         </dependency>
 
         <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Test-only SLF4J binding so tests can assert the partial-retrieval warning. -->
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
