@@ -211,9 +211,13 @@ class GoodMemContentRetrieverTest extends SdkTestSupport {
   }
 
   @Test
-  void missingSourceMetadataAndUnexpectedSpaceFailExplicitly() {
+  void missingMemoryMetadataIsKeptAsPartialButAnUnexpectedSpaceFails() {
+    // Q4a: a hit whose memory definition is missing is kept, without a space_id, and flagged.
     events(chunk(CHUNK, MEMORY, "Text", 0.5));
-    assertThrows(GoodMemException.class, () -> retriever().build().retrieve(Query.from("query")));
+    var kept = retriever().build().retrieve(Query.from("query")).getFirst().textSegment();
+    assertEquals("Text", kept.text());
+    assertEquals("true", kept.metadata().getString("goodmem_partial"));
+    assertFalse(kept.metadata().containsKey("space_id"));
     events(chunk(CHUNK, MEMORY, "Text", 0.5), definition(MEMORY, SPACE_2, Map.of()));
     assertThrows(GoodMemException.class, () -> retriever().build().retrieve(Query.from("query")));
   }

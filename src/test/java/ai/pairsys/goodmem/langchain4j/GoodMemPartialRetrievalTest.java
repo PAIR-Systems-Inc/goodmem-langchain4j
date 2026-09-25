@@ -40,15 +40,37 @@ class GoodMemPartialRetrievalTest extends SdkTestSupport {
     return json(Map.of("status", Map.of("code", code, "message", message)));
   }
 
-  /** The stream GoodMem sent for a nonexistent reranker: diagnostics plus ten vector hits. */
+  /** Vector score of the i-th fallback hit: negative inner product, so the best is the lowest. */
+  static double vectorScore(int index) {
+    return -0.7168 + index * 0.03;
+  }
+
+  /**
+   * The stream GoodMem sent for a nonexistent reranker (captured from a live server): diagnostics,
+   * the informational FEATURE_DISABLED for summarization, a result set produced by the "retrieve"
+   * stage, and ten vector hits in ascending (best-first) negative inner-product order.
+   */
   void rerankerFallbackStream() {
     List<String> lines = new ArrayList<>();
     lines.add(status("NOT_FOUND", "Reranker not found"));
+    lines.add(
+        json(
+            Map.of(
+                "status",
+                Map.of(
+                    "code",
+                    "FEATURE_DISABLED",
+                    "message",
+                    "Abstract reply generation disabled: no LLM configured.",
+                    "details",
+                    Map.of("required_param", "llm_id", "feature", "summarization")))));
     lines.add(status("RERANKING_FAILED", "Reranking skipped; returning vector results"));
-    for (int i = 0; i < 10; i++) {
-      lines.add(chunk(chunkId(i), MEMORY, "Vector hit " + i, 0.9 - i * 0.05));
-    }
+    lines.add(GoodMemIncompleteStreamTest.boundary("BEGIN", "retrieve"));
     lines.add(definition(MEMORY, SPACE, Map.of("source", "handbook")));
+    for (int i = 0; i < 10; i++) {
+      lines.add(chunk(chunkId(i), MEMORY, "Vector hit " + i, vectorScore(i)));
+    }
+    lines.add(GoodMemIncompleteStreamTest.boundary("END", "retrieve"));
     events(lines.toArray(String[]::new));
   }
 
@@ -111,7 +133,7 @@ class GoodMemPartialRetrievalTest extends SdkTestSupport {
       assertEquals(List.of("NOT_FOUND", "RERANKING_FAILED"), codes(content));
       // The reranker never ran: these are vector scores and must not be labelled as reranked.
       assertEquals("vector", metadata.getString("goodmem_score_type"));
-      assertEquals(0.9 - i * 0.05, content.metadata().get(ContentMetadata.SCORE));
+      assertEquals(vectorScore(i), content.metadata().get(ContentMetadata.SCORE));
       assertNull(content.metadata().get(ContentMetadata.RERANKED_SCORE));
       assertEquals("handbook", metadata.getString("source"));
     }
@@ -257,7 +279,23 @@ class GoodMemPartialRetrievalTest extends SdkTestSupport {
                 null);
     var output = JSON.readTree(result);
     assertTrue(output.isArray(), result);
+    assertEquals(1, output.size(), result);
     assertEquals("Complete", output.at("/0/text").asText());
+    // The 0.2.0 keys, plus goodmem_score_type (new in 0.2.1); no partial markers.
+    List<String> keys = new ArrayList<>();
+    output.at("/0/metadata").fieldNames().forEachRemaining(keys::add);
+    assertEquals(
+        java.util.Set.of("memory_id", "chunk_id", "space_id", "goodmem_score_type"),
+        java.util.Set.copyOf(keys),
+        result);
+    assertEquals(
+        java.util.Set.of("text", "metadata"), java.util.Set.copyOf(fieldNames(output.get(0))));
+  }
+
+  static List<String> fieldNames(com.fasterxml.jackson.databind.JsonNode node) {
+    List<String> names = new ArrayList<>();
+    node.fieldNames().forEachRemaining(names::add);
+    return names;
   }
 
   @Test

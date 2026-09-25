@@ -79,12 +79,32 @@ final class GoodMemSearchTool {
   }
 
   private static String note(RetrievalResults.ContentResult found) {
-    return "GoodMem reported a problem during this search, so these results may be incomplete"
-        + (found.contents().isEmpty() ? " (none were returned)" : "")
-        + (found.vectorFallback()
-            ? "; reranking did not run and results are in vector-search order"
-            : "")
-        + ". Tell the user the search was incomplete. Diagnostics: "
-        + RetrievalResults.summary(found.statuses());
+    StringBuilder note =
+        new StringBuilder(
+            found.statuses().isEmpty()
+                ? "Some GoodMem search results arrived incomplete"
+                : "GoodMem reported a problem during this search");
+    note.append(", so these results may be incomplete");
+    if (found.contents().isEmpty()) {
+      note.append(" (none were returned)");
+    }
+    if (found.vectorFallback()) {
+      note.append("; reranking did not run and results are in vector-search order");
+    }
+    if (found.textlessItems() > 0) {
+      note.append("; ")
+          .append(found.textlessItems())
+          .append(" result(s) arrived without text and were left out");
+    }
+    if (found.undefinedMemories() > 0) {
+      note.append("; ")
+          .append(found.undefinedMemories())
+          .append(" result(s) have no memory metadata, so their source is unknown");
+    }
+    note.append(". Tell the user the search was incomplete.");
+    if (!found.statuses().isEmpty()) {
+      note.append(" Diagnostics: ").append(RetrievalResults.summary(found.statuses()));
+    }
+    return note.toString();
   }
 }

@@ -2,10 +2,12 @@ package ai.pairsys.goodmem.langchain4j;
 
 import ai.pairsys.goodmem.client.Goodmem;
 import ai.pairsys.goodmem.client.models.ChunkId;
+import ai.pairsys.goodmem.client.models.ChunkReference;
 import ai.pairsys.goodmem.client.models.GoodMemStatus;
 import ai.pairsys.goodmem.client.models.GoodMemStatusCode;
 import ai.pairsys.goodmem.client.models.Memory;
 import ai.pairsys.goodmem.client.models.MemoryId;
+import ai.pairsys.goodmem.client.models.ResultSetBoundary;
 import ai.pairsys.goodmem.client.models.RetrieveMemoryEvent;
 import ai.pairsys.goodmem.client.models.RetrieveMemoryRequest;
 import ai.pairsys.goodmem.client.models.SpaceId;
@@ -51,15 +53,23 @@ final class RetrievalResults {
   }
 
   /**
-   * Contents for the framework plus the non-informational diagnostics they were retrieved with;
-   * {@code vectorFallback} means a configured reranker did not run.
+   * Contents for the framework plus the non-informational diagnostics they were retrieved with.
+   * {@code vectorFallback} means a configured reranker did not run; {@code textlessItems} counts
+   * retrieved items skipped because they had no text or identifiers, and {@code undefinedMemories}
+   * counts kept hits whose memory definition the stream did not carry.
    */
   record ContentResult(
-      List<Content> contents, List<GoodMemStatus> statuses, boolean vectorFallback) {
+      List<Content> contents,
+      List<GoodMemStatus> statuses,
+      boolean vectorFallback,
+      int textlessItems,
+      int undefinedMemories) {
     boolean partial() {
-      return !statuses.isEmpty();
+      return !statuses.isEmpty() || textlessItems > 0 || undefinedMemories > 0;
     }
   }
+
+  private record Hit(ChunkReference reference, Memory memory) {}
 
   static ContentResult content(
       List<RetrieveMemoryEvent> events,
@@ -80,19 +90,12 @@ final class RetrievalResults {
         throw new GoodMemRetrievalException(known);
       }
     }
-    // GoodMem falls back to vector order when the reranker is missing or fails, so the scores
-    // then come from vector search and must not be reported as reranker scores.
-    boolean rerankerScored =
-        reranked
-            && problems.stream()
-                .noneMatch(
-                    s ->
-                        s.code() == GoodMemStatusCode.RERANKING_FAILED
-                            || s.code() == GoodMemStatusCode.NOT_FOUND);
-    String statusJson = problems.isEmpty() ? null : statusJson(problems);
+    boolean rerankerScored = reranked && rerankerScored(events, problems);
     Map<MemoryId, Memory> memories = memories(events);
     Set<ChunkId> seen = new HashSet<>();
-    List<Content> results = new ArrayList<>();
+    List<Hit> hits = new ArrayList<>();
+    int textless = 0;
+    int undefined = 0;
     for (var event : events) {
       if (event.retrievedItem() == null || event.retrievedItem().chunk() == null) {
         continue;
@@ -104,69 +107,119 @@ final class RetrievalResults {
           || chunk.memoryId() == null
           || chunk.chunkText() == null
           || chunk.chunkText().isBlank()) {
-        throw new GoodMemException("Retrieval returned a chunk without text or identifiers");
+        if (failOnIncomplete) {
+          throw new GoodMemException("Retrieval returned a chunk without text or identifiers");
+        }
+        // Nothing to hand the framework; the other hits are still valid (contract Q4a).
+        textless++;
+        continue;
       }
       Memory memory = memories.get(chunk.memoryId());
       if (memory == null) {
-        throw new GoodMemException("Retrieval omitted metadata for memory " + chunk.memoryId());
-      }
-      if (!spaces.contains(memory.spaceId())) {
+        if (failOnIncomplete) {
+          throw new GoodMemException("Retrieval omitted metadata for memory " + chunk.memoryId());
+        }
+        // The server could not load this memory (e.g. MEMORY_LOAD_FAILED); keep its text.
+        undefined++;
+      } else if (!spaces.contains(memory.spaceId())) {
         throw new GoodMemException("Retrieval returned a memory outside the configured spaces");
       }
-      if (!seen.add(chunk.chunkId())) {
-        continue;
-      }
-      Map<String, Object> metadata = new LinkedHashMap<>();
-      copyMetadata(metadata, memory.metadata());
-      copyMetadata(metadata, chunk.metadata());
-      var memoryMetadata = memory.metadata() == null ? Map.<String, Object>of() : memory.metadata();
-      var chunkMetadata = chunk.metadata() == null ? Map.<String, Object>of() : chunk.metadata();
-      boolean collision =
-          memoryMetadata.keySet().stream().anyMatch(chunkMetadata::containsKey)
-              || memoryMetadata.keySet().stream().anyMatch(RESERVED::contains)
-              || chunkMetadata.keySet().stream().anyMatch(RESERVED::contains);
-      if (collision) {
-        // LangChain4j Metadata accepts scalar values, so keep the originals as JSON.
-        copyMetadata(
-            metadata,
-            Map.of("goodmem_metadata", Map.of("memory", memoryMetadata, "chunk", chunkMetadata)));
-      }
-      if (!metadata.containsKey("source") && memory.originalContentRef() != null) {
-        metadata.put("source", memory.originalContentRef());
-      }
-      metadata.put("memory_id", chunk.memoryId().toString());
-      metadata.put("chunk_id", chunk.chunkId().toString());
-      metadata.put("space_id", memory.spaceId().toString());
-      // Integration-owned markers are never taken from stored metadata (originals stay above).
-      metadata.remove(PARTIAL);
-      metadata.remove(STATUSES);
-      metadata.remove(SCORE_TYPE);
-      if (statusJson != null) {
-        metadata.put(PARTIAL, "true");
-        metadata.put(STATUSES, statusJson);
-      }
-      Map<ContentMetadata, Object> scores = new EnumMap<>(ContentMetadata.class);
-      if (reference.relevanceScore() != null) {
-        scores.put(ContentMetadata.SCORE, reference.relevanceScore());
-        metadata.put(SCORE_TYPE, rerankerScored ? "reranker" : "vector");
-        if (rerankerScored) {
-          scores.put(ContentMetadata.RERANKED_SCORE, reference.relevanceScore());
-        }
-      }
-      if (results.size() < limit) {
-        results.add(
-            Content.from(TextSegment.from(chunk.chunkText(), Metadata.from(metadata)), scores));
+      if (seen.add(chunk.chunkId()) && hits.size() < limit) {
+        hits.add(new Hit(reference, memory));
       }
     }
-    if (!problems.isEmpty()) {
+    boolean partial = !problems.isEmpty() || textless > 0 || undefined > 0;
+    String statusJson = partial ? statusJson(problems) : null;
+    List<Content> results = new ArrayList<>();
+    for (var hit : hits) {
+      results.add(content(hit, statusJson, rerankerScored));
+    }
+    if (partial) {
       LOG.warn(
-          "GoodMem retrieval was incomplete; returning {} result(s) marked {}=true{}: {}",
+          "GoodMem retrieval was incomplete; returning {} result(s) marked {}=true{}{}{}: {}",
           results.size(),
           PARTIAL,
           reranked && !rerankerScored ? " in vector order because reranking did not run" : "",
-          summary(problems));
+          textless > 0 ? "; skipped " + textless + " item(s) without text or identifiers" : "",
+          undefined > 0 ? "; kept " + undefined + " item(s) without memory metadata" : "",
+          problems.isEmpty() ? "no status reported" : summary(problems));
     }
-    return new ContentResult(List.copyOf(results), problems, reranked && !rerankerScored);
+    return new ContentResult(
+        List.copyOf(results), problems, reranked && !rerankerScored, textless, undefined);
+  }
+
+  private static Content content(Hit hit, String statusJson, boolean rerankerScored) {
+    var reference = hit.reference();
+    var chunk = reference.chunk();
+    Memory memory = hit.memory();
+    Map<String, Object> memoryMetadata =
+        memory == null || memory.metadata() == null ? Map.of() : memory.metadata();
+    Map<String, Object> chunkMetadata = chunk.metadata() == null ? Map.of() : chunk.metadata();
+    Map<String, Object> metadata = new LinkedHashMap<>();
+    copyMetadata(metadata, memoryMetadata);
+    copyMetadata(metadata, chunkMetadata);
+    boolean collision =
+        memoryMetadata.keySet().stream().anyMatch(chunkMetadata::containsKey)
+            || memoryMetadata.keySet().stream().anyMatch(RESERVED::contains)
+            || chunkMetadata.keySet().stream().anyMatch(RESERVED::contains);
+    if (collision) {
+      // LangChain4j Metadata accepts scalar values, so keep the originals as JSON.
+      copyMetadata(
+          metadata,
+          Map.of("goodmem_metadata", Map.of("memory", memoryMetadata, "chunk", chunkMetadata)));
+    }
+    if (!metadata.containsKey("source") && memory != null && memory.originalContentRef() != null) {
+      metadata.put("source", memory.originalContentRef());
+    }
+    metadata.put("memory_id", chunk.memoryId().toString());
+    metadata.put("chunk_id", chunk.chunkId().toString());
+    // Without a definition the space is unknown; stored metadata must not stand in for it.
+    metadata.remove("space_id");
+    if (memory != null) {
+      metadata.put("space_id", memory.spaceId().toString());
+    }
+    // Integration-owned markers are never taken from stored metadata (originals stay above).
+    metadata.remove(PARTIAL);
+    metadata.remove(STATUSES);
+    metadata.remove(SCORE_TYPE);
+    if (statusJson != null) {
+      metadata.put(PARTIAL, "true");
+      metadata.put(STATUSES, statusJson);
+    }
+    Map<ContentMetadata, Object> scores = new EnumMap<>(ContentMetadata.class);
+    if (reference.relevanceScore() != null) {
+      scores.put(ContentMetadata.SCORE, reference.relevanceScore());
+      metadata.put(SCORE_TYPE, rerankerScored ? "reranker" : "vector");
+      if (rerankerScored) {
+        scores.put(ContentMetadata.RERANKED_SCORE, reference.relevanceScore());
+      }
+    }
+    return Content.from(TextSegment.from(chunk.chunkText(), Metadata.from(metadata)), scores);
+  }
+
+  /**
+   * Whether a configured reranker produced the scores. The stream names the stage that produced its
+   * result set ({@code rerank} when reranking ran, {@code retrieve} for vector order), so that is
+   * trusted when present. Older streams without stage names fall back to the statuses GoodMem sends
+   * when the reranker is missing or fails.
+   */
+  private static boolean rerankerScored(
+      List<RetrieveMemoryEvent> events, List<GoodMemStatus> problems) {
+    List<String> stages =
+        events.stream()
+            .map(RetrieveMemoryEvent::resultSetBoundary)
+            .filter(Objects::nonNull)
+            .map(ResultSetBoundary::stageName)
+            .filter(name -> name != null && !name.isBlank())
+            .toList();
+    if (!stages.isEmpty()) {
+      return stages.stream().anyMatch("rerank"::equalsIgnoreCase);
+    }
+    return problems.stream()
+        .noneMatch(
+            s ->
+                s.code() == GoodMemStatusCode.RERANKING_FAILED
+                    || s.code() == GoodMemStatusCode.NOT_FOUND);
   }
 
   static String summary(List<GoodMemStatus> statuses) {
@@ -261,12 +314,14 @@ final class RetrievalResults {
         List.copyOf(chunks), reply.isEmpty() ? null : reply.toString(), statuses, partial);
   }
 
+  /**
+   * Contract Q1: these two codes are noise by code alone. {@code FEATURE_DISABLED} means the caller
+   * did not configure an optional feature; a requested feature that failed has its own code. The
+   * details are deliberately not inspected.
+   */
   private static boolean informational(GoodMemStatus status) {
     return status.code() == GoodMemStatusCode.LLM_CAPABILITY_INFERRED
-        || (status.code() == GoodMemStatusCode.FEATURE_DISABLED
-            && status.details() != null
-            && "summarization".equals(status.details().get("feature"))
-            && "llm_id".equals(status.details().get("required_param")));
+        || status.code() == GoodMemStatusCode.FEATURE_DISABLED;
   }
 
   private static void copyMetadata(Map<String, Object> target, Map<String, Object> source) {

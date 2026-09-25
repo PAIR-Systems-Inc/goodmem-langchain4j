@@ -63,14 +63,18 @@ public final class GoodMemContentRetriever implements ContentRetriever {
    * Returns matching content in server order. A server diagnostic never discards hits: when GoodMem
    * reports a non-informational status, every returned {@code TextSegment} carries {@code
    * goodmem_partial=true} and the statuses as JSON in {@code goodmem_statuses}, and one SLF4J
-   * warning is logged. If a configured reranker failed, the hits are in vector order and are not
-   * given a {@code RERANKED_SCORE}.
+   * warning is logged. The same happens when results arrive incomplete: a result without text is
+   * left out and a result whose memory definition is missing is kept without {@code space_id}. If a
+   * configured reranker did not run, the hits are in vector order, labelled {@code
+   * goodmem_score_type=vector} and not given a {@code RERANKED_SCORE}.
    *
    * @param query query text and optional application metadata
    * @return matching chunks with source metadata; empty when nothing matched or nothing could be
    *     retrieved
    * @throws GoodMemRetrievalException only with {@code failOnIncompleteRetrieval(true)}, if the
    *     server reports a known non-informational status
+   * @throws GoodMemException if a result belongs to a space this retriever was not configured for,
+   *     or, only with {@code failOnIncompleteRetrieval(true)}, if a result is incomplete
    */
   @Override
   public List<Content> retrieve(Query query) {
@@ -240,9 +244,10 @@ public final class GoodMemContentRetriever implements ContentRetriever {
 
     /**
      * Throws {@link GoodMemRetrievalException} instead of returning hits when GoodMem reports a
-     * known non-informational status. Off by default: incomplete retrieval returns the hits it has,
-     * marked {@code goodmem_partial=true}. Enabling this makes an AI Service's {@code chat} call
-     * fail when, for example, a reranker is missing but vector results exist.
+     * known non-informational status, and {@link GoodMemException} when a result arrives without
+     * text or without its memory definition. Off by default: incomplete retrieval returns the hits
+     * it has, marked {@code goodmem_partial=true}. Enabling this makes an AI Service's {@code chat}
+     * call fail when, for example, a reranker is missing but vector results exist.
      *
      * @param failOnIncompleteRetrieval true to restore the 0.2.0 throwing behaviour
      * @return this builder
