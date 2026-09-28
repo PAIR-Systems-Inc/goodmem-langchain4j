@@ -28,6 +28,7 @@ public final class GoodMemContentRetriever implements ContentRetriever {
   private final String filter;
   private final Function<Query, String> dynamicFilter;
   private final RerankerId rerankerId;
+  private final boolean failOnIncompleteRetrieval;
 
   private GoodMemContentRetriever(Builder builder) {
     client = Objects.requireNonNull(builder.client, "client");
@@ -46,6 +47,7 @@ public final class GoodMemContentRetriever implements ContentRetriever {
     }
     filter = builder.filter;
     dynamicFilter = builder.dynamicFilter;
+    failOnIncompleteRetrieval = builder.failOnIncompleteRetrieval;
   }
 
   /**
@@ -58,14 +60,28 @@ public final class GoodMemContentRetriever implements ContentRetriever {
   }
 
   /**
-   * Returns matching content in server order, or throws if retrieval was incomplete.
+   * Returns matching content in server order. A server diagnostic never discards hits: when GoodMem
+   * reports a non-informational status, every returned {@code TextSegment} carries {@code
+   * goodmem_partial=true} and the statuses as JSON in {@code goodmem_statuses}, and one SLF4J
+   * warning is logged. The same happens when results arrive incomplete: a result without text is
+   * left out and a result whose memory definition is missing is kept without {@code space_id}. If a
+   * configured reranker did not run, the hits are in vector order, labelled {@code
+   * goodmem_score_type=vector} and not given a {@code RERANKED_SCORE}.
    *
    * @param query query text and optional application metadata
-   * @return matching chunks with source metadata; empty for a successful search with no matches
-   * @throws GoodMemRetrievalException if the server reports incomplete retrieval
+   * @return matching chunks with source metadata; empty when nothing matched or nothing could be
+   *     retrieved
+   * @throws GoodMemRetrievalException only with {@code failOnIncompleteRetrieval(true)}, if the
+   *     server reports a known non-informational status
+   * @throws GoodMemException if a result belongs to a space this retriever was not configured for,
+   *     or, only with {@code failOnIncompleteRetrieval(true)}, if a result is incomplete
    */
   @Override
   public List<Content> retrieve(Query query) {
+    return search(query).contents();
+  }
+
+  RetrievalResults.ContentResult search(Query query) {
     Objects.requireNonNull(query, "query");
     String effectiveFilter = filter;
     if (dynamicFilter != null) {
@@ -94,7 +110,8 @@ public final class GoodMemContentRetriever implements ContentRetriever {
         RetrievalResults.read(client, request.build()),
         Set.copyOf(spaceIds),
         maxResults,
-        rerankerId != null);
+        rerankerId != null,
+        failOnIncompleteRetrieval);
   }
 
   /**
@@ -135,6 +152,7 @@ public final class GoodMemContentRetriever implements ContentRetriever {
     private String filter;
     private Function<Query, String> dynamicFilter;
     private RerankerId rerankerId;
+    private boolean failOnIncompleteRetrieval;
 
     private Builder() {}
 
@@ -154,9 +172,13 @@ public final class GoodMemContentRetriever implements ContentRetriever {
      *
      * @param spaceIds one or more space UUIDs
      * @return this builder
+     * @throws IllegalArgumentException if an ID is not a UUID
      */
     public Builder spaceIds(List<String> spaceIds) {
-      this.spaceIds = spaceIds.stream().map(SpaceId::from).toList();
+      this.spaceIds =
+          spaceIds.stream()
+              .map(id -> SpaceId.from(GoodMemIds.requireUuid(id, "spaceIds")))
+              .toList();
       return this;
     }
 
@@ -210,9 +232,28 @@ public final class GoodMemContentRetriever implements ContentRetriever {
      *
      * @param rerankerId reranker UUID, or null to disable reranking
      * @return this builder
+     * @throws IllegalArgumentException if the ID is not a UUID
      */
     public Builder rerankerId(String rerankerId) {
-      this.rerankerId = rerankerId == null ? null : RerankerId.from(rerankerId);
+      this.rerankerId =
+          rerankerId == null
+              ? null
+              : RerankerId.from(GoodMemIds.requireUuid(rerankerId, "rerankerId"));
+      return this;
+    }
+
+    /**
+     * Throws {@link GoodMemRetrievalException} instead of returning hits when GoodMem reports a
+     * known non-informational status, and {@link GoodMemException} when a result arrives without
+     * text or without its memory definition. Off by default: incomplete retrieval returns the hits
+     * it has, marked {@code goodmem_partial=true}. Enabling this makes an AI Service's {@code chat}
+     * call fail when, for example, a reranker is missing but vector results exist.
+     *
+     * @param failOnIncompleteRetrieval true to restore the 0.2.0 throwing behaviour
+     * @return this builder
+     */
+    public Builder failOnIncompleteRetrieval(boolean failOnIncompleteRetrieval) {
+      this.failOnIncompleteRetrieval = failOnIncompleteRetrieval;
       return this;
     }
 

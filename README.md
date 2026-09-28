@@ -10,7 +10,7 @@ Requires **Java 21+** and LangChain4j 1.20.0+.
 <dependency>
     <groupId>io.github.bashareid</groupId>
     <artifactId>goodmem-langchain4j</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.1</version>
 </dependency>
 ```
 
@@ -62,9 +62,9 @@ public class Quickstart {
 
 ## Connect your agent
 
-Pass the retriever to `AiServices.builder(...).contentRetriever(retriever)`. A `Result<String>` return type gives you both the answer and `sources()`.
+Pass the retriever to `AiServices.builder(...).contentRetriever(retriever)`. A `Result<String>` return type gives you both the answer and `sources()`. If GoodMem reports a problem during retrieval, such as a missing reranker, or some results arrive incomplete, the retriever still returns the hits it can use and marks each one with `goodmem_partial` metadata and the server's `goodmem_statuses`, instead of failing the chat. Use `failOnIncompleteRetrieval(true)` if you would rather have an exception.
 
-For agent-directed search, use `retriever.asTool("searchPolicies", "Search our customer policies")`. Register a `List<AiServiceTool>` through `.tools(searchTools)`. Its only input is the query; your application configures the spaces, filters and reranker. Agents that need to manage spaces or write memories can use `new GoodMemTools(client)`. Local file uploads require an explicitly configured directory.
+For agent-directed search, use `retriever.asTool("searchPolicies", "Search our customer policies")`. Register a `List<AiServiceTool>` through `.tools(searchTools)`. Its only input is the query; your application configures the spaces, filters and reranker. Agents that need to manage spaces or write memories can use `new GoodMemTools(client)`. Local file uploads require an explicitly configured directory. Every space, memory, embedder, reranker and LLM ID must be a UUID, and anything else is refused before a request is sent, because the SDK puts IDs in URL paths where a value such as `../spaces/<id>` would reach a different resource.
 
 See the [usage guide](docs/usage.md) for AI Services, dynamic filters, async workflows and tool results, and the [migration notes](CHANGELOG.md) before upgrading from 0.1.
 

@@ -44,7 +44,8 @@ import java.util.Objects;
  * return compact, readable results; administrative methods return SDK models. LangChain4j
  * serializes tool results and handles exceptions. For application-scoped search, use {@link
  * GoodMemContentRetriever#asTool(String, String)}. Local file uploads are disabled unless the
- * application configures an upload directory.
+ * application configures an upload directory. Every ID must be a UUID: the SDK places IDs in URL
+ * paths, so any other value is refused with {@link IllegalArgumentException} before a request.
  */
 public final class GoodMemTools {
   private final Goodmem client;
@@ -108,7 +109,10 @@ public final class GoodMemTools {
         SpaceCreationRequest.builder()
             .name(name)
             .labels(labels)
-            .spaceEmbedders(List.of(new SpaceEmbedderConfig(EmbedderId.from(embedderId), 1.0)))
+            .spaceEmbedders(
+                List.of(
+                    new SpaceEmbedderConfig(
+                        EmbedderId.from(GoodMemIds.requireUuid(embedderId, "embedderId")), 1.0)))
             .build());
   }
 
@@ -135,10 +139,11 @@ public final class GoodMemTools {
       @P(value = "Optional memory metadata", required = false) Map<String, Object> metadata,
       @P(value = "Wait until this memory is indexed; defaults to true", required = false)
           Boolean wait) {
+    String space = GoodMemIds.requireUuid(spaceId, "spaceId");
     if ((textContent == null) == (filePath == null)) {
       throw new IllegalArgumentException("Provide exactly one of textContent or filePath");
     }
-    var request = JsonMemoryCreationRequest.builder().spaceId(spaceId).metadata(metadata);
+    var request = JsonMemoryCreationRequest.builder().spaceId(space).metadata(metadata);
     if (textContent != null) {
       request.originalContent(textContent).contentType("text/plain");
     } else {
@@ -202,19 +207,27 @@ public final class GoodMemTools {
     if (spaceIds == null || spaceIds.isEmpty()) {
       throw new IllegalArgumentException("At least one spaceId is required");
     }
+    List<SpaceKey> spaceKeys =
+        spaceIds.stream()
+            .map(
+                id ->
+                    new SpaceKey(
+                        SpaceId.from(GoodMemIds.requireUuid(id, "spaceIds")), null, filter))
+            .toList();
+    String reranker = rerankerId == null ? null : GoodMemIds.requireUuid(rerankerId, "rerankerId");
+    String llm = llmId == null ? null : GoodMemIds.requireUuid(llmId, "llmId");
     var request =
         RetrieveMemoryRequest.builder()
             .message(query)
-            .spaceKeys(
-                spaceIds.stream().map(id -> new SpaceKey(SpaceId.from(id), null, filter)).toList())
+            .spaceKeys(spaceKeys)
             .requestedSize(candidates)
             .fetchMemory(true)
             .fetchMemoryContent(false);
-    if (rerankerId != null || llmId != null) {
+    if (reranker != null || llm != null) {
       request.postProcessor(
           ChatPostProcessorConfig.builder()
-              .rerankerId(rerankerId)
-              .llmId(llmId)
+              .rerankerId(reranker)
+              .llmId(llm)
               .maxResults((long) limit)
               .build());
     }
@@ -235,7 +248,7 @@ public final class GoodMemTools {
           Boolean includeContent) {
     Memory memory =
         client.memories.get(
-            memoryId,
+            GoodMemIds.requireUuid(memoryId, "memoryId"),
             MemoryGetOptions.builder()
                 .includeContent(!Boolean.FALSE.equals(includeContent))
                 .build());
@@ -346,7 +359,7 @@ public final class GoodMemTools {
    */
   @Tool("Permanently delete a GoodMem memory and its chunks.")
   public void goodmemDeleteMemory(@P("Memory UUID") String memoryId) {
-    client.memories.delete(memoryId);
+    client.memories.delete(GoodMemIds.requireUuid(memoryId, "memoryId"));
   }
 
   /**
@@ -383,7 +396,7 @@ public final class GoodMemTools {
    */
   @Tool("Get a GoodMem space's name, labels and embedder configuration.")
   public Space goodmemGetSpace(@P("Space UUID") String spaceId) {
-    return client.spaces.get(spaceId);
+    return client.spaces.get(GoodMemIds.requireUuid(spaceId, "spaceId"));
   }
 
   /**
@@ -404,7 +417,7 @@ public final class GoodMemTools {
       @P(value = "Labels to merge with existing labels", required = false)
           Map<String, String> mergeLabels) {
     return client.spaces.update(
-        spaceId,
+        GoodMemIds.requireUuid(spaceId, "spaceId"),
         UpdateSpaceRequest.builder()
             .name(name)
             .replaceLabels(replaceLabels)
@@ -419,7 +432,7 @@ public final class GoodMemTools {
    */
   @Tool("Permanently delete a GoodMem space and all its memories.")
   public void goodmemDeleteSpace(@P("Space UUID") String spaceId) {
-    client.spaces.delete(spaceId);
+    client.spaces.delete(GoodMemIds.requireUuid(spaceId, "spaceId"));
   }
 
   /**
@@ -440,7 +453,7 @@ public final class GoodMemTools {
       @P(value = "Optional native metadata filter", required = false) String filter) {
     return collect(
         client.memories.list(
-            spaceId,
+            GoodMemIds.requireUuid(spaceId, "spaceId"),
             MemoryListOptions.builder()
                 .statusFilter(statusFilter)
                 .filter(filter)

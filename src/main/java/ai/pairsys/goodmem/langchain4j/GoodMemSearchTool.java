@@ -6,6 +6,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.service.tool.AiServiceTool;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Builds native AI Service tools bound to application-configured retrieval. */
@@ -46,21 +47,64 @@ final class GoodMemSearchTool {
                     || arguments.path("query").asText().isBlank()) {
                   throw new IllegalArgumentException("Search expects only a nonblank query string");
                 }
-                var results = retriever.retrieve(Query.from(arguments.get("query").asText()));
-                return JSON.writeValueAsString(
-                    results.stream()
+                var found = retriever.search(Query.from(arguments.get("query").asText()));
+                var results =
+                    found.contents().stream()
                         .map(
-                            content ->
-                                Map.of(
-                                    "text",
-                                    content.textSegment().text(),
-                                    "metadata",
-                                    content.textSegment().metadata().toMap()))
-                        .toList());
+                            content -> {
+                              Map<String, Object> metadata =
+                                  new LinkedHashMap<>(content.textSegment().metadata().toMap());
+                              // Reported once below instead of repeated on every hit.
+                              metadata.remove(RetrievalResults.PARTIAL);
+                              metadata.remove(RetrievalResults.STATUSES);
+                              return Map.of(
+                                  "text", content.textSegment().text(), "metadata", metadata);
+                            })
+                        .toList();
+                if (!found.partial()) {
+                  return JSON.writeValueAsString(results);
+                }
+                Map<String, Object> output = new LinkedHashMap<>();
+                output.put("results", results);
+                output.put("partial", true);
+                output.put(
+                    "statuses", JSON.readTree(RetrievalResults.statusJson(found.statuses())));
+                output.put("note", note(found));
+                return JSON.writeValueAsString(output);
               } catch (JsonProcessingException e) {
                 throw new IllegalArgumentException("Cannot encode or decode search tool JSON", e);
               }
             })
         .build();
+  }
+
+  private static String note(RetrievalResults.ContentResult found) {
+    StringBuilder note =
+        new StringBuilder(
+            found.statuses().isEmpty()
+                ? "Some GoodMem search results arrived incomplete"
+                : "GoodMem reported a problem during this search");
+    note.append(", so these results may be incomplete");
+    if (found.contents().isEmpty()) {
+      note.append(" (none were returned)");
+    }
+    if (found.vectorFallback()) {
+      note.append("; reranking did not run and results are in vector-search order");
+    }
+    if (found.textlessItems() > 0) {
+      note.append("; ")
+          .append(found.textlessItems())
+          .append(" result(s) arrived without text and were left out");
+    }
+    if (found.undefinedMemories() > 0) {
+      note.append("; ")
+          .append(found.undefinedMemories())
+          .append(" result(s) have no memory metadata, so their source is unknown");
+    }
+    note.append(". Tell the user the search was incomplete.");
+    if (!found.statuses().isEmpty()) {
+      note.append(" Diagnostics: ").append(RetrievalResults.summary(found.statuses()));
+    }
+    return note.toString();
   }
 }

@@ -81,6 +81,7 @@ class LangChain4jWiringTest extends SdkTestSupport {
     List<String> callbacks = new ArrayList<>();
     var observable =
         retriever()
+            .failOnIncompleteRetrieval(true)
             .build()
             .addListener(
                 new ContentRetrieverListener() {
@@ -104,5 +105,8 @@ class LangChain4jWiringTest extends SdkTestSupport {
     events(status("EMBEDDER_FAILED"));
     assertThrows(GoodMemRetrievalException.class, () -> observable.retrieve(Query.from("failure")));
     assertEquals(List.of("request", "response", "request", "error"), callbacks);
+    server.enqueue(new okhttp3.mockwebserver.MockResponse().setResponseCode(500).setBody("{}"));
+    assertThrows(RuntimeException.class, () -> observable.retrieve(Query.from("http failure")));
+    assertEquals(List.of("request", "response", "request", "error", "request", "error"), callbacks);
   }
 }

@@ -145,9 +145,10 @@ public final class GoodMemDocumentIngestor {
      *
      * @param spaceId destination space UUID
      * @return this builder
+     * @throws IllegalArgumentException if the ID is not a UUID
      */
     public Builder spaceId(String spaceId) {
-      this.spaceId = SpaceId.from(spaceId);
+      this.spaceId = SpaceId.from(GoodMemIds.requireUuid(spaceId, "spaceId"));
       return this;
     }
 
